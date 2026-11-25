@@ -1,0 +1,18 @@
+# Analysis options for TechBrief Flutter App
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - web/**
+    - android/**
+  errors:
+    deprecated_member_use: ignore
+    dangling_library_doc_comments: ignore
+
+linter:
+  rules:
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false
+    use_super_parameters: false
