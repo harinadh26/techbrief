@@ -1,4 +1,4 @@
-package com.example.techbrief
+package com.techbrief.app
 
 import io.flutter.embedding.android.FlutterActivity
 
