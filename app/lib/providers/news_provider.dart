@@ -1,7 +1,5 @@
-/// news_provider.dart - Central State Management for TechBrief
-/// Handles news feeds, 30-min cached articles, search filtering, local persistent bookmarks,
-/// dark/light theme switching, and backend URL settings.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/article.dart';
 import '../services/api_service.dart';
@@ -19,6 +17,10 @@ class NewsProvider extends ChangeNotifier {
   bool _isLoading = true;
   bool _isRefreshing = false;
   String? _errorMessage;
+
+  // Automatic Refresh
+  Timer? _autoRefreshTimer;
+  bool _isAutoRefreshInProgress = false;
 
   // Filter & Search
   String _selectedCategory = 'All';
@@ -58,6 +60,35 @@ class NewsProvider extends ChangeNotifier {
       _loadNewsInternal(showLoadingIndicator: true),
       _loadCategoriesInternal(),
     ]);
+
+    // Start automatic news refresh
+    _startAutoRefresh();
+  }
+
+  /// Automatically refresh news every 60 seconds
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+
+    _autoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) async {
+        if (_isLoading || _isRefreshing || _isAutoRefreshInProgress) {
+          return;
+        }
+
+        _isAutoRefreshInProgress = true;
+
+        try {
+          debugPrint('TechBrief: Automatically refreshing news...');
+          await _loadNewsInternal(showLoadingIndicator: false);
+          debugPrint('TechBrief: Automatic refresh completed.');
+        } catch (e) {
+          debugPrint('TechBrief: Automatic refresh failed: $e');
+        } finally {
+          _isAutoRefreshInProgress = false;
+        }
+      },
+    );
   }
 
   /// Sets the active bottom navigation tab
@@ -97,9 +128,16 @@ class NewsProvider extends ChangeNotifier {
   Future<void> refreshNews() async {
     _isRefreshing = true;
     notifyListeners();
-    await _loadNewsInternal(showLoadingIndicator: false, forceRefresh: true);
-    _isRefreshing = false;
-    notifyListeners();
+
+    try {
+      await _loadNewsInternal(
+        showLoadingIndicator: false,
+        forceRefresh: true,
+      );
+    } finally {
+      _isRefreshing = false;
+      notifyListeners();
+    }
   }
 
   /// Initial load or retry on error
@@ -119,13 +157,14 @@ class NewsProvider extends ChangeNotifier {
 
     try {
       final fetched = await _apiService.fetchNews(refresh: forceRefresh);
-      
+
       // Sync bookmark states
       final bookmarkIds = _bookmarks.map((b) => b.id).toSet();
       final bookmarkLinks = _bookmarks.map((b) => b.link).toSet();
 
       for (var article in fetched) {
-        if (bookmarkIds.contains(article.id) || bookmarkLinks.contains(article.link)) {
+        if (bookmarkIds.contains(article.id) ||
+            bookmarkLinks.contains(article.link)) {
           article.isBookmarked = true;
         }
       }
@@ -160,25 +199,28 @@ class NewsProvider extends ChangeNotifier {
       // Remove bookmark
       _bookmarks.removeAt(existingIndex);
       article.isBookmarked = false;
-      // Update in main list
+
       for (var a in _articles) {
         if (a.id == article.id || a.link == article.link) {
           a.isBookmarked = false;
         }
       }
+
       await _storageService.saveBookmarks(_bookmarks);
     } else {
       // Add bookmark
       article.isBookmarked = true;
       _bookmarks.insert(0, article);
-      // Update in main list
+
       for (var a in _articles) {
         if (a.id == article.id || a.link == article.link) {
           a.isBookmarked = true;
         }
       }
+
       await _storageService.saveBookmarks(_bookmarks);
     }
+
     notifyListeners();
   }
 
@@ -190,11 +232,13 @@ class NewsProvider extends ChangeNotifier {
   /// Removes a bookmark directly by id
   Future<void> removeBookmark(String articleId) async {
     _bookmarks.removeWhere((b) => b.id == articleId);
+
     for (var a in _articles) {
       if (a.id == articleId) {
         a.isBookmarked = false;
       }
     }
+
     notifyListeners();
     await _storageService.saveBookmarks(_bookmarks);
   }
@@ -229,16 +273,15 @@ class NewsProvider extends ChangeNotifier {
   /// Returns filtered articles based on selected category chip & search query
   List<Article> get filteredArticles {
     return _articles.where((article) {
-      // 1. Category Filter
       final matchesCategory = _selectedCategory == 'All' ||
           article.category.toLowerCase() == _selectedCategory.toLowerCase();
 
       if (!matchesCategory) return false;
 
-      // 2. Search Query Filter (Title, Source, Category, Summary)
       if (_searchQuery.isEmpty) return true;
 
       final query = _searchQuery.toLowerCase();
+
       return article.title.toLowerCase().contains(query) ||
           article.source.toLowerCase().contains(query) ||
           article.category.toLowerCase().contains(query) ||
@@ -249,12 +292,21 @@ class NewsProvider extends ChangeNotifier {
   /// Returns filtered bookmarks based on search query
   List<Article> get filteredBookmarks {
     if (_searchQuery.isEmpty) return _bookmarks;
+
     final query = _searchQuery.toLowerCase();
+
     return _bookmarks.where((b) {
       return b.title.toLowerCase().contains(query) ||
           b.source.toLowerCase().contains(query) ||
           b.category.toLowerCase().contains(query) ||
           b.summary.toLowerCase().contains(query);
     }).toList();
+  }
+
+  /// Stop automatic refresh when provider is disposed
+  @override
+  void dispose() {
+    _autoRefreshTimer?.cancel();
+    super.dispose();
   }
 }

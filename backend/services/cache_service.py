@@ -9,7 +9,7 @@ from typing import Any, Optional, Dict
 
 
 class CacheService:
-    def __init__(self, default_ttl_seconds: int = 1800):
+    def __init__(self, default_ttl_seconds: int = 86400):
         self._ttl = default_ttl_seconds
         self._cache: Dict[str, Any] = {}
         self._timestamps: Dict[str, float] = {}

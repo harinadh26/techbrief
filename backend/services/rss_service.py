@@ -201,7 +201,60 @@ class RSSService:
             logger.error(f"Error fetching {source_name} RSS: {e}")
 
         return raw_items
+    def refresh_new_articles(self) -> List[Article]:
+        """
+        Checks RSS feeds and summarizes only articles not already cached.
+        """
+        cache_key = "all_articles"
+        cached_articles = cache_service.get(cache_key)
 
+        # First run: populate the cache using the existing method.
+        if cached_articles is None:
+            return self.get_latest_news(force_refresh=True)
+
+        existing_ids = {article.id for article in cached_articles}
+
+        logger.info("Checking RSS feeds for new articles...")
+
+        new_raw = []
+        seen_links = set()
+
+        for feed in FEEDS:
+            items = self.fetch_articles_from_feed(feed, limit_per_source=4)
+
+            for item in items:
+                if item["id"] not in existing_ids and item["link"] not in seen_links:
+                    new_raw.append(item)
+                    seen_links.add(item["link"])
+
+        new_articles = []
+
+        for item in new_raw:
+            try:
+                summary = ai_service.summarize_article(
+                    title=item["title"],
+                    content=item["clean_text"],
+                )
+
+                new_articles.append(Article(
+                    id=item["id"],
+                    title=item["title"],
+                    link=item["link"],
+                    source=item["source"],
+                    published_date=item["published_date"],
+                    summary=summary,
+                    category=item["category"],
+                ))
+
+            except Exception as e:
+                logger.error(f"Error processing new article: {e}")
+
+        if new_articles:
+            updated_articles = new_articles + cached_articles
+            cache_service.set(cache_key, updated_articles)
+            logger.info(f"Added {len(new_articles)} new articles.")
+
+        return cache_service.get(cache_key) or cached_articles
     def get_latest_news(self, force_refresh: bool = False) -> List[Article]:
         """
         Retrieves news from cache if valid, otherwise aggregates from all 3 feeds
